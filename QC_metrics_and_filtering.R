@@ -31,8 +31,11 @@
 
 add_visium_qc_metrics <- function(object, mt_pattern = "^mt-") {
   
+  
+  
   # Get the name of the active assay, for example "Spatial"
   assay_name <- DefaultAssay(object)
+  
   
   # Build the standard Seurat metadata column names
   # Example:
@@ -41,13 +44,21 @@ add_visium_qc_metrics <- function(object, mt_pattern = "^mt-") {
   count_col <- paste0("nCount_", assay_name)
   feature_col <- paste0("nFeature_", assay_name)
   
+
+  
+  #remover
+  object <- subset(object, subset = nCount_Spatial > 0)
+  
+  
+  
   # Calculate mitochondrial percentage for each bin/spot
-  # This adds a new metadata column called percent.mt
+  # adds a new metadata column called percent.mt
   object[["percent.mt"]] <- PercentageFeatureSet(
     object,
     pattern = mt_pattern
   )
   
+
   # Return the updated object
   object
 }
@@ -102,3 +113,5 @@ filter_visium_object_by_qc <- function(
   # Return a Seurat object containing only the kept bins
   subset(object, cells = keep_bins)
 }
+
+

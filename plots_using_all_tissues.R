@@ -6,6 +6,9 @@ library(ggridges)
 library(ggbeeswarm)
 
 
+#TODO, make this work with segmented cell data ! ! ! !
+
+
 # ------------------------------------------------------------
 # Load project configuration
 #
@@ -14,9 +17,7 @@ library(ggbeeswarm)
 #   files_list
 #   bin_size
 # ------------------------------------------------------------
-source("/projects/nagy_lab_projects/projects_benjones/Filtering Michail Data/code/config.R")
-
-
+source(file.path(code_dir, "config.R"))
 
 # ------------------------------------------------------------
 # Create an empty list to store per-sample QC tables
@@ -314,7 +315,7 @@ save_plot(qc_ridge_all,"QC_ridge_all_samples",bin_output_dir,width = 10,height =
 # ------------------------------------------------------------
 # Compute a per-metric cutoff at the 99th percentile
 # This removes the top 1% of values from the plots only.
-# Your saved qc_long table stays unchanged.
+# saved qc_long table stays unchanged.
 # ------------------------------------------------------------
 qc_caps <- qc_long %>%
   group_by(metric) %>%

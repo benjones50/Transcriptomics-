@@ -10,10 +10,12 @@ source(file.path(code_dir, "config.R"))
 object <- load_visium_object(
   sample_output_dir = sample_output_dir,
   sample_name = sample_name,
+  analysis_mode = analysis_mode,
   sample_tissue = sample_tissue,
   raw_data_dir = raw_data_dir,
   bin_size = bin_size,
-  version = "qc"
+  version = "qc",
+  force_rebuild = TRUE
 )
 
 # Load filtered object 
@@ -21,6 +23,7 @@ filtered_object <- load_visium_object(
   sample_output_dir = sample_output_dir,
   sample_name = sample_name,
   sample_tissue = sample_tissue,
+  analysis_mode = analysis_mode,
   raw_data_dir = raw_data_dir,
   bin_size = bin_size,
   version = "filtered",
@@ -28,11 +31,14 @@ filtered_object <- load_visium_object(
   max_counts = max_counts,
   min_features = min_features,
   max_features = max_features,
-  max_percent_mt = max_percent_mt
+  max_percent_mt = max_percent_mt,
+  force_rebuild = TRUE
 )
 
 
+# TODO wrap this in a function for consistent plotting of segmented vs not
 
+# TODO make all plots wrapped by functions with 1 runner file, list of functions etc
 
 
 # ----------------------------------------------------------
@@ -95,9 +101,7 @@ vln_spatial_qc_plot <- qc_vln /
   plot_annotation(
     title = paste0(
       sample_name,
-      " QC Summary (",
-      bin_size,
-      " um bins)"
+      "_QC_Summary"
     )
   )
 
@@ -171,9 +175,7 @@ spatial_plot <- SpatialDimPlot(
   ggtitle(
     paste0(
       sample_name,
-      " | ",
-      bin_size,
-      " um bins | QC Filtering Results"
+      "| QC Filtering Results"
     )
   ) &
   theme(
@@ -305,3 +307,15 @@ save_plot(
 )
 
                           
+
+
+
+
+
+
+
+
+
+
+
+
