@@ -1,7 +1,8 @@
 library(Seurat)
 library(BPCells)
 library(tidyverse)
-
+library(dplyr)
+library(arrow)
 
 #options(future.globals.maxSize = 1e10)
 
@@ -340,25 +341,106 @@ build_segmented_visium_object <- function(sample_id) {
   
   seurat_temp[[paste0("slice1.", sample_id)]] <- polygon_object
   
-  # # ----------------------------------------------------------
-  # # Add mitochondrial percentage
-  # # ----------------------------------------------------------
-  # 
-  # seurat_temp[["percent.mt"]] <- PercentageFeatureSet(
-  #   seurat_temp,
-  #   pattern = "^mt-"
-  # )
+
+  
+  
+  
+  # ==========================================================
+  # Restrict segmentation object to the Loupe-selected tissue
+  # ==========================================================
+  #
+  # Cell segmentation outputs contain every segmented cell in
+  # the experiment, regardless of the region exported for
+  # downstream analysis.
+  #
+  # To keep the segmentation object consistent with the binned
+  # workflow, load the corresponding filtered 2 µm object and
+  # use Space Ranger's barcode mapping table to identify which
+  # segmented cells overlap the retained 2 µm bins.
+  # ==========================================================
+  message()
+  
+  message("Loading filtered 2 µm reference object...")
+  message("used for file mask made in loupe...")
+  
+  
+  ref_2um_object <- load_visium_object(
+    analysis_mode = "binned",
+    sample_tissue = sample_tissue,
+    raw_data_dir = raw_data_dir,
+    bin_size = 2,
+    stage = "raw",
+    force_rebuild = FALSE
+  )
+  
+  # Barcodes retained after Loupe region selection
+  selected_bins <- colnames(ref_2um_object)
+  
+  message(
+    "Reading file of mask made in loupe..."
+  )
+  
+  mapping <- arrow::read_parquet(
+    file.path(
+      raw_data_dir,
+      sample_id,
+      "outs",
+      "barcode_mappings.parquet"
+    )
+  )
+  
+  message(
+    "Identifying segmented cells overlapping selected 2 µm bins..."
+  )
+  
+  
+  selected_cells <- mapping %>%
+    filter(
+      square_002um %in% selected_bins,
+      in_cell,
+      !is.na(cell_id)
+    ) %>%
+    distinct(cell_id) %>%
+    pull(cell_id)
   
 
+  
+  # Keep only segmented cells contained within the selected
+  # tissue region
+  seurat_temp <- subset(
+    seurat_temp,
+    cells = selected_cells
+  )
+  
+  matched_cells <- sum(selected_cells %in% Cells(seurat_temp))
+  
+  message(
+    "Retained ",
+    length(selected_bins),
+    " 2 µm bins mapping to ",
+    length(selected_cells),
+    " segmented cells."
+  )
+  
+  message(
+    matched_cells,
+    " of ",
+    length(selected_cells),
+    " mapped cells were found in the segmentation object."
+  )
+  
+  
+  message(
+    "Segmentation object now contains ",
+    ncol(seurat_temp),
+    " cells."
+  )
+  
+  
   
   return(seurat_temp)
 }
 
 
 
-
-
-
-
-
-
+  

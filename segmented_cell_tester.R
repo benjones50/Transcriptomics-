@@ -9,14 +9,12 @@ source("/projects/nagy_lab_projects/projects_benjones/Filtering Michail Data/cod
 # ============================================================
 
 object <- load_visium_object(
-  sample_output_dir = sample_output_dir,
-  sample_name = sample_name,
-  analysis_mode = analysis_mode,
+  analysis_mode = "segmented",
   sample_tissue = sample_tissue,
   raw_data_dir = raw_data_dir,
-  bin_size = bin_size,
-  version = "qc",
-  force_rebuild = FALSE
+  bin_size = NULL,
+  stage = "qc",
+  force_rebuild = TRUE
 )
 
 
@@ -323,6 +321,10 @@ qc_vln <- VlnPlot(
   ) &
   NoLegend()
 
+
+
+
+
 # ============================================================
 # Combined QC figure
 # ============================================================
@@ -346,3 +348,12 @@ save_plot(
 )
 
 QC_overview_plot
+
+
+
+
+
+
+
+
+

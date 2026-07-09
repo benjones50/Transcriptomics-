@@ -2,10 +2,8 @@
 
 
 #load directories and settings
-source("/projects/nagy_lab_projects/projects_benjones/Filtering Michail Data/code/config.R")
+source(file.path(code_dir, "config.R"))
 
-#loads seurat object
-source(file.path(code_dir, "seurat_object_loader.R"))
 
 
 

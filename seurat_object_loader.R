@@ -18,104 +18,29 @@
 # ============================================================
 
 
-#TODO add project names to everything so its easier to merge seurats together
+#TODO add project names to everything so its easier to merge seurats together, bulk analysis, etc
 
 
 # loads helper functions for object loader
 # functions to add qc and filter
 source(file.path(code_dir, "QC_metrics_and_filtering.R"))
 source(file.path(code_dir,"cell_segmentation_custom.R"))
+source(file.path(code_dir,"object_path_builder.R"))
 
-# ------------------------------------------------------------
-# Build the filename for a Visium object version
-#
-# This encodes the settings for saved visium objects
-# ------------------------------------------------------------
-visium_object_path <- function(
-    sample_output_dir,
-    sample_name,
-    version = c("raw", "qc", "filtered"),
-    analysis_mode = c("binned", "segmented_cells"),
-    bin_size = NULL,
-    min_counts = NULL,
-    max_counts = NULL,
-    min_features = NULL,
-    max_features = NULL,
-    max_percent_mt = NULL
-) {
-  version <- match.arg(version)
-  analysis_mode <- match.arg(analysis_mode)
-  
-  # Start with the common pieces that every filename should have.
-  # This makes the object easy to identify later.
-  if (analysis_mode == "binned") {
-    base_name <- paste0(
-      "visium_seurat_",
-      version,
-      "_",
-      sample_name,
-      "_",
-      bin_size,
-      "um"
-    )
-  } else {
-    base_name <- paste0(
-      "cell_segmented_",
-      version,
-      "_",
-      sample_name
-    )
-  }
-  
-  # Add QC thresholds only for filtered objects.
-  # These settings become part of the filename so that different
-  # filter versions can coexist safely.
-if (version == "filtered") {
-    if (is.null(min_counts) || is.null(max_counts) ||
-        is.null(min_features) || is.null(max_features) ||
-        is.null(max_percent_mt)) {
-      stop(
-        "For version = 'filtered', you must provide min_counts, max_counts, ",
-        "min_features, max_features, and max_percent_mt."
-      )
-    }
 
-    base_name <- paste0(
-      base_name,
-      "_minC", min_counts,
-      "_maxC", max_counts,
-      "_minF", min_features,
-      "_maxF", max_features,
-      "_maxMT", max_percent_mt
-    )
-  }
-  
-  # Create a dedicated folder for Seurat objects
-  object_dir <- file.path(sample_output_dir, "objects")
-  dir.create(object_dir, recursive = TRUE, showWarnings = FALSE)
-  
 
-  
-  # Return the full file path for the object
-  file.path(
-    object_dir,
-    paste0(base_name, ".rds")
-  )
 
-}
 
 
 
 # ------------------------------------------------------------
 # Main loader
 load_visium_object <- function(
-    sample_output_dir,
-    sample_name,
     sample_tissue,
     raw_data_dir,
     bin_size = NULL,
     analysis_mode = c("binned", "segmented_cells"),
-    version = c("raw", "qc", "filtered"),
+    stage = c("raw", "qc", "filtered"),
     mt_pattern = "^mt-",
     min_counts = NULL,
     max_counts = NULL,
@@ -124,8 +49,9 @@ load_visium_object <- function(
     max_percent_mt = NULL,
     force_rebuild = FALSE
 ) {
-  version <- match.arg(version)
+  stage <- match.arg(stage)
   analysis_mode <- match.arg(analysis_mode)
+  
   
   
   # tell user exactly what object is being requested
@@ -133,7 +59,7 @@ load_visium_object <- function(
     "\n==============================\n",
     "Requested object\n",
     "analysis_mode = ", analysis_mode, "\n",
-    "version       = ", version,
+    "stage       = ", stage,
     if (!is.null(bin_size))
       paste0("\nbin_size      = ", bin_size, "um")
     else "",
@@ -162,24 +88,10 @@ load_visium_object <- function(
     )
   }
   
-  
-  
-  
-  
-  
-  
-  
-  
-  # Make sure the output directory exists before trying to save there.
-  dir.create(sample_output_dir, recursive = TRUE, showWarnings = FALSE)
-  
-  # ----------------------------------------------------------
-  # Determine the expected file path for this exact object
-  # ----------------------------------------------------------
-  object_file <- visium_object_path(
-    sample_output_dir = sample_output_dir,
-    sample_name = sample_name,
-    version = version,
+  #builds the storage/output path of the visium object
+  object_file <- build_object_path(
+    sample_tissue = sample_tissue,
+    stage = stage,
     analysis_mode = analysis_mode,
     bin_size = bin_size,
     min_counts = min_counts,
@@ -188,6 +100,7 @@ load_visium_object <- function(
     max_features = max_features,
     max_percent_mt = max_percent_mt
   )
+
   
   # ----------------------------------------------------------
   # If the exact file already exists, load it immediately
@@ -197,7 +110,7 @@ load_visium_object <- function(
     if (analysis_mode == "binned") {
       message(
         "Loading cached ",
-        version,
+        stage,
         " ",
         bin_size,
         "um object:\n  ",
@@ -206,7 +119,7 @@ load_visium_object <- function(
     } else {
       message(
         "Loading cached segmented-cell ",
-        version,
+        stage,
         " object:\n  ",
         object_file
       )
@@ -221,7 +134,7 @@ load_visium_object <- function(
   # ----------------------------------------------------------
   if (analysis_mode == "binned") {
     
-    if (version == "raw") {
+    if (stage == "raw") {
       
       message(
         "Building raw ",
@@ -229,10 +142,10 @@ load_visium_object <- function(
         " object..."
       )
       
-      # object <- Load10X_Spatial(
-      #   data.dir = file.path(raw_data_dir, sample_tissue, "outs"),
-      #   bin.size = bin_size
-      # )
+      object <- Load10X_Spatial(
+        data.dir = file.path(raw_data_dir, sample_tissue, "outs"),
+        bin.size = bin_size
+      )
       
       # ----------------------------------------------------------
       # Build binned object manually
@@ -242,10 +155,10 @@ load_visium_object <- function(
       # environment.
       # ----------------------------------------------------------
       
-      object <- build_binned_visium_object(
-        sample_id = sample_tissue,
-        bin_size = bin_size
-      )
+      # object <- build_binned_visium_object(
+      #   sample_id = sample_tissue,
+      #   bin_size = bin_size
+      # )
       
       
       
@@ -257,7 +170,7 @@ load_visium_object <- function(
     
     
     
-    if (version == "qc") {
+    if (stage == "qc") {
       
       message(
         "Building qc ",
@@ -266,13 +179,11 @@ load_visium_object <- function(
       )
       
       raw_object <- load_visium_object(
-        sample_output_dir = sample_output_dir,
-        sample_name = sample_name,
         sample_tissue = sample_tissue,
         raw_data_dir = raw_data_dir,
         bin_size = bin_size,
         analysis_mode = "binned",
-        version = "raw",
+        stage = "raw",
         mt_pattern = mt_pattern,
         force_rebuild = force_rebuild
       )
@@ -288,7 +199,7 @@ load_visium_object <- function(
     
     
     
-    if (version == "filtered") {
+    if (stage == "filtered") {
       
       message(
         "Building filtered ",
@@ -297,13 +208,11 @@ load_visium_object <- function(
       )
       
       qc_object <- load_visium_object(
-        sample_output_dir = sample_output_dir,
-        sample_name = sample_name,
         sample_tissue = sample_tissue,
         raw_data_dir = raw_data_dir,
         bin_size = bin_size,
         analysis_mode = "binned",
-        version = "qc",
+        stage = "qc",
         mt_pattern = mt_pattern,
         force_rebuild = force_rebuild
       )
@@ -327,7 +236,7 @@ load_visium_object <- function(
   # ----------------------------------------------------------
   if (analysis_mode == "segmented_cells") {
     
-    if (version == "raw") {
+    if (stage == "raw") {
       
       message(
         "Building raw ",
@@ -347,7 +256,7 @@ load_visium_object <- function(
     
     
     
-    if (version == "qc") {
+    if (stage == "qc") {
       
       message(
         "Building qc ",
@@ -356,12 +265,10 @@ load_visium_object <- function(
       )
       
       raw_object <- load_visium_object(
-        sample_output_dir = sample_output_dir,
-        sample_name = sample_name,
         sample_tissue = sample_tissue,
         raw_data_dir = raw_data_dir,
         analysis_mode = "segmented_cells",
-        version = "raw",
+        stage = "raw",
         force_rebuild = force_rebuild
       )
       
@@ -376,7 +283,7 @@ load_visium_object <- function(
     
     
     
-    if (version == "filtered") {
+    if (stage == "filtered") {
       
       message(
         "Building filtered ",
@@ -385,12 +292,10 @@ load_visium_object <- function(
       )
       
       qc_object <- load_visium_object(
-        sample_output_dir = sample_output_dir,
-        sample_name = sample_name,
         sample_tissue = sample_tissue,
         raw_data_dir = raw_data_dir,
         analysis_mode = "segmented_cells",
-        version = "qc",
+        stage = "qc",
         mt_pattern = mt_pattern,
         force_rebuild = force_rebuild
       )
@@ -409,7 +314,7 @@ load_visium_object <- function(
     }
   }
   #should never happen
-  stop("Unknown analysis_mode or version requested.")
+  stop("Unknown analysis_mode or stage requested.")
 }
     
     
@@ -431,34 +336,28 @@ load_visium_object <- function(
 # 
 # # Example: segmented cells
 # object <- load_visium_object(
-#   sample_output_dir = sample_output_dir,
-#   sample_name = sample_name,
 #   sample_tissue = sample_tissue,
 #   raw_data_dir = raw_data_dir,
 #   analysis_mode = analysis_mode,
-#   version = "raw",
+#   stage = "raw",
 #   force_rebuild = FALSE
 # )
 # 
 # # Example: segmented-cell QC object
-# qc_object <- load_visium_object(
-#   sample_output_dir = sample_output_dir,
-#   sample_name = sample_name,
+#   qc_object <- load_visium_object(
 #   sample_tissue = sample_tissue,
 #   raw_data_dir = raw_data_dir,
 #   analysis_mode = analysis_mode,
-#   version = "qc",
+#   stage = "qc",
 #   force_rebuild = FALSE
 # )
 # 
 # # Example: segmented-cell filtered object
 # filtered_object <- load_visium_object(
-#   sample_output_dir = sample_output_dir,
-#   sample_name = sample_name,
 #   sample_tissue = sample_tissue,
 #   raw_data_dir = raw_data_dir,
 #   analysis_mode = analysis_mode,
-#   version = "filtered",
+#   stage = "filtered",
 #   min_counts = min_counts,
 #   max_counts = max_counts,
 #   min_features = min_features,

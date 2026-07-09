@@ -23,94 +23,6 @@
 #object_SCT <- SCTransform(object,assay = "Spatial", new.assay.name = "SCT", vars.to.regress = "percent.mt", verbose = FALSE)
 
 
-# ------------------------------------------------------------
-# Build the filename for a normalized object
-#
-# This encodes the key settings used to generate the object,
-# so different normalization choices and QC settings can coexist.
-# ------------------------------------------------------------
-normalized_object_path <- function(
-    sample_output_dir,
-    sample_name,
-    normalization = c("lognorm", "sct"),
-    analysis_mode = c("binned", "segmented_cells"),
-    bin_size = NULL,
-    min_counts = NULL,
-    max_counts = NULL,
-    min_features = NULL,
-    max_features = NULL,
-    max_percent_mt = NULL
-) {
-  normalization <- match.arg(normalization)
-  analysis_mode <- match.arg(analysis_mode)
-  
-  # Put all normalized objects in a dedicated subfolder.
-  norm_dir <- file.path(sample_output_dir, "objects", "normalized")
-  dir.create(norm_dir, recursive = TRUE, showWarnings = FALSE)
-  
-  # Build a readable filename that captures the object type and settings.
-  if (analysis_mode == "binned") {
-    
-    if (is.null(bin_size)) {
-      stop("bin_size must be supplied when analysis_mode = 'binned'")
-    }
-    
-    base_name <- paste0(
-      "object_normal_",
-      sample_name,
-      "_",
-      bin_size,
-      "um"
-    )
-    
-  } else if (analysis_mode == "segmented_cells") {
-    
-    base_name <- paste0(
-      "cell_seg_normal_",
-      sample_name
-    )
-    
-  } else {
-    stop("Unknown analysis_mode supplied to normalized_object_path().")
-  }
-  
-  # If this normalized object is based on a filtered object, encode
-  # the QC thresholds so the cache key is unambiguous.
-  if (
-    is.null(min_counts) || is.null(max_counts) ||
-    is.null(min_features) || is.null(max_features) ||
-    is.null(max_percent_mt)
-  ) {
-    stop(
-      "For normalized objects, you must provide min_counts, max_counts, ",
-      "min_features, max_features, and max_percent_mt so the cache key ",
-      "matches the filtered object it was built from."
-    )
-  }
-  
-  base_name <- paste0(
-    base_name,
-    "_minC", min_counts,
-    "_maxC", max_counts,
-    "_minF", min_features,
-    "_maxF", max_features,
-    "_maxMT", max_percent_mt
-  )
-  
-  # Add the normalization method to the filename.
-  if (normalization == "lognorm") {
-    base_name <- paste0(base_name, "_lognorm")
-  } else if (normalization == "sct") {
-    base_name <- paste0(base_name, "_sct")
-  }
-  
-  file.path(norm_dir, paste0(base_name, ".rds"))
-}
-
-
-
-
-
 
 # ------------------------------------------------------------
 # Normalize a Seurat object using the chosen method
@@ -118,7 +30,7 @@ normalized_object_path <- function(
 normalize_visium_object <- function(
     object,
     normalization = c("lognorm", "sct"),
-    vars.to.regress = "percent.mt",
+    vars.to.regress = NULL, #"percent.mt",
     sct_assay_name = "SCT",
     scale.factor = 10000,
     verbose = FALSE
@@ -191,9 +103,7 @@ normalize_visium_object <- function(
 #   2) if present, load it
 #   3) if not, load filtered object, normalize, save, return
 # ------------------------------------------------------------
-load_normalized_object <- function(
-    sample_output_dir,
-    sample_name,
+load_normalized_object <- function( #TODO add vars to regress as a variable here
     sample_tissue,
     raw_data_dir,
     analysis_mode = c("binned", "segmented_cells"),
@@ -234,16 +144,12 @@ load_normalized_object <- function(
     stop("bin_size must be NULL when analysis_mode = 'segmented_cells'")
   }
   
-  # Make sure the output directory exists.
-  dir.create(sample_output_dir, recursive = TRUE, showWarnings = FALSE)
-  
   # ----------------------------------------------------------
   # Build the exact normalized object path for these settings.
   # ----------------------------------------------------------
-  object_file <- normalized_object_path(
-    sample_output_dir = sample_output_dir,
-    sample_name = sample_name,
-    normalization = normalization,
+  object_file <- build_object_path(
+    sample_tissue = sample_tissue,
+    stage = normalization,
     analysis_mode = analysis_mode,
     bin_size = bin_size,
     min_counts = min_counts,
@@ -288,14 +194,13 @@ load_normalized_object <- function(
   
   # Load the filtered object from existing loader.
   # This keeps the normalized loader separate from the raw/qc/filter pipeline.
+  #uses load_visium_object from the seurat object loaders
   filtered_object <- load_visium_object(
-    sample_output_dir = sample_output_dir,
-    sample_name = sample_name,
     sample_tissue = sample_tissue,
     raw_data_dir = raw_data_dir,
     bin_size = bin_size,
     analysis_mode = analysis_mode,
-    version = "filtered",
+    stage = "filtered",
     mt_pattern = mt_pattern,
     min_counts = min_counts,
     max_counts = max_counts,
@@ -315,8 +220,8 @@ load_normalized_object <- function(
   object <- normalize_visium_object(
         object = filtered_object,
         normalization = normalization,
-        vars.to.regress = "percent.mt",
-        sct_assay_name = "SCT",
+        vars.to.regress = NULL, #"percent.mt",
+        sct_assay_name = "sct",
         scale.factor = 10000,
         verbose = verbose
       )

@@ -9,8 +9,6 @@ source("/projects/nagy_lab_projects/projects_benjones/Filtering Michail Data/cod
 
 
 
-
-
 #loads seurat object
 source(file.path(code_dir, "seurat_object_loader.R"))
 
@@ -19,10 +17,6 @@ source(file.path(code_dir, "seurat_object_loader.R"))
 #   data.dir = paste0(raw_data_dir, sample_tissue, "/outs"),
 #   bin.size = bin_size
 # )
-
-
-
-
 
 # ------------------------------------------------------------
 # Coordinates

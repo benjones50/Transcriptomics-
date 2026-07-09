@@ -46,8 +46,12 @@ add_visium_qc_metrics <- function(object, mt_pattern = "^mt-") {
   
 
   
-  #remover
-  object <- subset(object, subset = nCount_Spatial > 0)
+  #removes cells that have 0 counts
+  keep_cells <- rownames(object@meta.data)[
+    object@meta.data[[count_col]] > 0
+  ]
+  
+  object <- subset(object, cells = keep_cells)
   
   
   

@@ -552,7 +552,7 @@ feature_col <- paste0("nFeature_",DefaultAssay(object))
 count_spatial <- SpatialFeaturePlot_safe(
   object,
   features = count_col,
-  pt.size.factor = pt_size,
+  pt.size.factor = 2,
   image.alpha = 0.05
 ) + ggtitle("nCount (Raw UMI Counts)")
 
