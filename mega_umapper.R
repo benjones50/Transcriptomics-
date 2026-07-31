@@ -1,35 +1,24 @@
 source("/projects/nagy_lab_projects/projects_benjones/Filtering Michail Data/code/config.R")
-
-
+#this is where ive been running my pca's, harmony, clustering, umapping, and projecting. then lots of umap plots
 
 mega_obj <- load_mega_object(
   directory = mega_dir
 )
-
-
-
-
 cat("number of bins/cells in mega object:", ncol(mega_obj))
 
 
-
-# pca_results <- run_pca_analysis(
-#   object = mega_obj,
-#   root_dir = mega_dir
-# )
-# 
-# 
-# mega_obj_pca <- pca_results$object
-# 
-# pca_results$loading_plot
-# pca_results$elbow_plot
-# pca_results$variance_plot
+options(future.globals.maxSize = 1000 * 1024^2)
 
 
+
+sketch_label <- "sketch_33pct" #name of sketch
+ncells_total <- ncol(mega_obj)
+ncells_sketch <- ncells_total%/%3 #defining how sketch actually made
 
 pca_dir <- get_pca_dir(
   root_dir = mega_dir,
-  dims = 50
+  ndims = 50,
+  sketch_label = sketch_label
 )
 
 
@@ -38,11 +27,10 @@ mega_obj <- load_or_build_object(
   build_function = function() {
     run_sketch_pca(
       object = mega_obj,
-      ncells = 50000
+      ncells = ncells_sketch
     )
   }
 )
-
 
 
 pca_plots <- plot_pca_diagnostics(
@@ -58,187 +46,490 @@ pca_plots$elbow_plot
 pca_plots$loading_plot
 
 
-#decide on max dims
-max_dims <- 30
+# Decide on embedding
+max_dims <- 11
 
+
+
+if (embedding == "harmony") {
+  group.by.vars <- "tissue"
+  
+  
+  harmony_dir <- get_harmony_dir(
+    root_dir = mega_dir,
+    ndims = max_dims,
+    sketch_label = "sketch_33pct",
+    group.by.vars = group.by.vars
+  )
+  
+  mega_obj <- load_or_build_object(
+    directory = harmony_dir,
+    build_function = function() {
+      run_harmony_embedding(
+        object = mega_obj,
+        ndims = max_dims,
+        sketch_reduction = "pca.sketch",
+        group.by.vars = "tissue"
+      )
+    },
+    force_rebuild = FALSE
+  )
+  
+  embedding_run_dir <- harmony_dir
+  
+} else {
+  
+  embedding_run_dir <- pca_dir
+  
+}
+
+
+
+resolution <- 0.3
+
+
+#alternative directory used for testing
+# clustering_dir_normal <- get_clustering_dir(
+#   embedding_run_dir = embedding_run_dir,
+#   ndims = max_dims,
+#   resolution = resolution
+# )
+# 
+# clustering_dir <- get_nested_subdir(
+#   clustering_dir_normal,
+#   "multi_res_0.5"
+# )
+
+#cluster / load clustered object
 clustering_dir <- get_clustering_dir(
-  root_dir = mega_dir,
-  dims = 1:max_dims,
-  resolution = 3
+  embedding_run_dir = embedding_run_dir,
+  ndims = max_dims,
+  resolution = resolution
 )
-
 
 mega_obj <- load_or_build_object(
   directory = clustering_dir,
   build_function = function() {
-    run_sketch_clustering(
+    
+    object <- run_sketch_clustering(
       object = mega_obj,
+      sketch_reduction = embedding_reduction,
       dims = 1:max_dims,
-      resolution = 3
+      resolution = resolution
     )
-  }
+    
+    object <- add_silhouette( #approx silhouette using centroids of clusters
+      object = object,
+      reduction = embedding_reduction, 
+      dims = 1:max_dims,
+      cluster_column = "seurat_cluster.sketched"
+    )
+    object
+  },
+  force_rebuild = TRUE
 )
+ 
 
 
 umap_dir <- get_umap_dir(
-  root_dir = mega_dir,
-  dims = 1:max_dims
+  clustering_dir = clustering_dir
 )
 
 
-mega_obj <- load_or_build_object(
-  directory = umap_dir,
-  build_function = function() {
-    run_sketch_umap(
+
+# not used bc don't need to save umap
+# mega_obj <- load_or_build_object(
+#   directory = umap_dir,
+#   build_function = function() {
+#     run_sketch_umap(
+#       object = mega_obj,
+#       sketch_reduction = embedding_reduction,
+#       dims = 1:max_dims
+#     )
+#   },
+#   force_rebuild = TRUE
+# )
+mega_obj <- run_sketch_umap(
       object = mega_obj,
+      sketch_reduction = embedding_reduction,
       dims = 1:max_dims
     )
-  }
-)
-
 
 projection_dir <- get_projection_dir(
-  root_dir = mega_dir,
-  dims = 1:max_dims
+  umap_dir = umap_dir
 )
+
 
 mega_obj <- load_or_build_object(
   directory = projection_dir,
   build_function = function() {
     run_sketch_projection(
-      object = mega_obj
+      object = mega_obj,
+      normalization_method = normalization_method,
+      sketch_reduction = embedding_reduction,
+      ndims = max_dims
     )
-  }
+  },
+  force_rebuild = FALSE
 )
 
 
 
+
+
+
+mega_obj <- add_silhouette( #approx silhouette using centroids of clusters
+      object = mega_obj,
+      reduction = embedding_reduction, 
+      dims = 1:max_dims,
+      cluster_column = "seurat_cluster.sketched" # "seurat_cluster.harmony" "seurat_cluster.sketched"?
+    )
+
+
+
+
 # ------------------------------------------------------------
-# 1) Basic object checks
+# Basic object checks
 # ------------------------------------------------------------
 cat("===== Assays =====\n")
-print(Assays(mega_obj_umapped))
+print(Assays(mega_obj))
 
 cat("\n===== Reductions =====\n")
-print(Reductions(mega_obj_umapped))
+print(Reductions(mega_obj))
 
 cat("\n===== Metadata cluster columns =====\n")
-print(grep("cluster", colnames(mega_obj_umapped[[]]), value = TRUE))
+print(grep("cluster", colnames(mega_obj[[]]), value = TRUE))
 
 
 # ------------------------------------------------------------
-# 2) Sketch size check
+# Sketch size check
 # ------------------------------------------------------------
-cat("Original cells:", ncol(mega_obj_umapped), "\n")
-cat("Sketch cells:", ncol(mega_obj_umapped[["sketch"]]), "\n")
+cat("Original cells:", ncol(mega_obj), "\n")
+cat("Sketch cells:", ncol(mega_obj[["sketch"]]), "\n")
 cat(
   sprintf(
     "Sketch represents %.2f%% of all cells\n",
-    100 * ncol(mega_obj_umapped[["sketch"]]) / ncol(mega_obj_umapped)
+    100 * ncol(mega_obj[["sketch"]]) / ncol(mega_obj)
   )
 )
 
 
 # ------------------------------------------------------------
-# 3) Projection checks, makes sure every cell projected to
-# ------------------------------------------------------------
-# proj <- Embeddings(mega_obj_umapped, "projected.pca")
-# cat("Projected cells:", nrow(proj), "\n")
-# cat("Total cells:", ncol(mega_obj_umapped), "\n")
-# stopifnot(nrow(proj) == ncol(mega_obj_umapped))
-# 
-# umap <- Embeddings(mega_obj_umapped, "full.umap.sketch")
-# stopifnot(nrow(umap) == ncol(mega_obj_umapped))
-
-
-
-# ------------------------------------------------------------
-# 4) Cluster assignment checks
+# Cluster assignment checks
 # ------------------------------------------------------------
 
 cat("Projected cluster assignments:\n")
 
 cat(
   "Cells with projected clusters:",
-  sum(!is.na(mega_obj_umapped$seurat_cluster.projected)),
+  sum(!is.na(mega_obj$seurat_cluster.projected)),
   "\n"
 )
 
 cat(
   "Cells missing projected clusters:",
-  sum(is.na(mega_obj_umapped$seurat_cluster.projected)),
+  sum(is.na(mega_obj$seurat_cluster.projected)),
   "\n"
 )
+
+sum(is.na(mega_obj$seurat_cluster.projected.score))
+# 4092
 
 cat(
   "\nNumber of projected clusters:",
-  length(unique(mega_obj_umapped$seurat_cluster.projected)),
+  length(unique(mega_obj$seurat_cluster.projected)),
   "\n"
 )
 
-# ------------------------------------------------------------
-# Prefix for all diagnostic plots #TODO rethink this, seems bad
-# ------------------------------------------------------------
-plot_prefix <- paste0(
-  "mega_",
-  analysis_mode,
-  if (!is.null(bin_size)) paste0("_", bin_size, "um") else "",
-  "_",
-  normalization
-)
 
 
 # ------------------------------------------------------------
 # Plot dir
 # ------------------------------------------------------------
 
-#saving loading plot
-plot_dir <- get_figures_dir(projection_dir)
-
+plot_dir <- paste0(get_figures_dir(projection_dir),"/mega_umapper")
 
 # ------------------------------------------------------------
-# 4b) Projection confidence
-#
-# Visualize the confidence score assigned by ProjectData() for
-# each projected cluster assignment. Higher scores indicate
-# greater confidence that a cell belongs to its assigned cluster.
+# Information for plot titles
 # ------------------------------------------------------------
 
-summary(
-  mega_obj_umapped$seurat_cluster.projected.score
+n_sketch_cells <- ncol(mega_obj[["sketch"]])
+n_total_cells  <- ncol(mega_obj)
+
+sketch_title <- sprintf(
+  "Sketch UMAP\nRepresentative sketch of %s cells (%.1f%% of dataset)",
+  format(n_sketch_cells, big.mark = ","),
+  100 * n_sketch_cells / n_total_cells
+)
+
+projected_title <- sprintf(
+  "Projected UMAP\nProjection of all %s cells into sketch UMAP",
+  format(n_total_cells, big.mark = ",")
+)
+
+
+#based on code by https://romanhaa.github.io/projects/scrnaseq_workflow/
+
+# ------------------------------------------------------------
+# Projected UMAP
+# ------------------------------------------------------------
+
+# Convert projected clusters to the same factor ordering as the
+# sketch clusters so cluster colors remain consistent across plots.
+mega_obj$seurat_cluster.projected <- factor(
+  mega_obj$seurat_cluster.projected,
+  levels = levels(mega_obj$seurat_cluster.sketched)
 )
 
 # ------------------------------------------------------------
-# Order clusters by abundance (largest -> smallest)
+# Compute cluster label positions
+#
+# Labels are placed at the median UMAP coordinate of each cluster,
+# which is more robust to outliers than using the mean.
 # ------------------------------------------------------------
 
-cluster_counts <- table(mega_obj_umapped$seurat_cluster.projected)
-
-cluster_percent <- 100 * cluster_counts / sum(cluster_counts)
-
-cluster_order <- names(
-  sort(
-    cluster_counts,
-    decreasing = TRUE
+# Extract projected UMAP coordinates
+projected_umap_df <- as.data.frame(
+  Embeddings(
+    mega_obj,
+    "full.umap.sketch"
   )
 )
 
-# reorders based on cell abundance order
-mega_obj_umapped$seurat_cluster.projected <- factor(
-  mega_obj_umapped$seurat_cluster.projected,
-  levels = cluster_order
+# Give the coordinate columns consistent names
+colnames(projected_umap_df)[1:2] <- c(
+  "UMAP_1",
+  "UMAP_2"
 )
-# Tell Seurat to group violins by the projected clusters
-Idents(mega_obj_umapped) <- "seurat_cluster.projected"
+
+# Add projected cluster assignments
+projected_umap_df$cluster <- mega_obj$seurat_cluster.projected
+
+# Compute median UMAP position for each cluster
+projected_umap_centers <- projected_umap_df %>%
+  dplyr::filter(
+    !is.na(cluster)
+  ) %>%
+  dplyr::group_by(
+    cluster
+  ) %>%
+  dplyr::summarise(
+    x = median(UMAP_1),
+    y = median(UMAP_2),
+    .groups = "drop"
+  )
 
 # ------------------------------------------------------------
-# Create informative x-axis labels
-#
-# Each label shows:
-#   Cluster ID
-#   Percent of total cells
-#   Number of cells
+# Build projected UMAP
 # ------------------------------------------------------------
+
+p_projected <- DimPlot(
+  mega_obj,
+  reduction = "full.umap.sketch",
+  group.by = "seurat_cluster.projected",
+  label = FALSE
+) +
+  ggtitle(projected_title) +
+  theme(
+    legend.position = "bottom"
+  ) +
+  
+# --------------------------------------------------------
+# Add cluster labels
+# --------------------------------------------------------
+geom_label(
+  data = projected_umap_centers,
+  mapping = aes(
+    x = x,
+    y = y,
+    label = cluster
+  ),
+  inherit.aes = FALSE,
+  size = 4.5,
+  fill = "white",
+  color = "black",
+  fontface = "bold",
+  alpha = 0.5,
+  linewidth = 0,
+  show.legend = FALSE
+) +
+  
+# --------------------------------------------------------
+# Annotate the total number of cells/bins
+# --------------------------------------------------------
+annotate(
+  geom = "text",
+  x = Inf,
+  y = -Inf,
+  label = paste0(
+    "n = ",
+    format(
+      ncol(mega_obj),
+      big.mark = ",",
+      trim = TRUE
+    )
+  ),
+  vjust = -1.5,
+  hjust = 1.25,
+  color = "black",
+  size = 2.5
+)
+
+save_plot(
+  plot_object = p_projected,
+  file_stub = paste0("projection_labeled"),
+  save_dir = plot_dir,
+  width = 7,
+  height = 7
+)
+
+# ------------------------------------------------------------
+# Sketch UMAP
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# Compute cluster label positions
+#
+# Labels are placed at the median UMAP coordinate of each
+# sketch cluster, which is more robust to outliers than the mean.
+# ------------------------------------------------------------
+
+# Extract sketch UMAP coordinates
+sketch_umap_df <- as.data.frame(
+  Embeddings(
+    mega_obj,
+    "umap.sketch"
+  )
+)
+
+# Give the coordinate columns consistent names
+colnames(sketch_umap_df)[1:2] <- c(
+  "UMAP_1",
+  "UMAP_2"
+)
+
+# Add sketch cluster assignments for the cells in the embedding
+sketch_umap_df$cluster <-
+  mega_obj[[]][
+    rownames(sketch_umap_df),
+    "seurat_cluster.sketched"
+  ]
+
+# Compute median UMAP position for each cluster
+sketch_umap_centers <- sketch_umap_df %>%
+  dplyr::filter(
+    !is.na(cluster)
+  ) %>%
+  dplyr::group_by(
+    cluster
+  ) %>%
+  dplyr::summarise(
+    x = median(UMAP_1),
+    y = median(UMAP_2),
+    .groups = "drop"
+  )
+
+# ------------------------------------------------------------
+# Build sketch UMAP
+# ------------------------------------------------------------
+
+p_sketch <- DimPlot(
+  mega_obj,
+  reduction = "umap.sketch",
+  group.by = "seurat_cluster.sketched",
+  label = FALSE
+) +
+  ggtitle(sketch_title) +
+  theme(
+    legend.position = "bottom"
+  ) +
+  
+# ----------------------------------------------------------
+# Add cluster labels
+# ----------------------------------------------------------
+geom_label(
+  data = sketch_umap_centers,
+  mapping = aes(
+    x = x,
+    y = y,
+    label = cluster
+  ),
+  inherit.aes = FALSE,
+  size = 4.5,
+  fill = "white",
+  color = "black",
+  fontface = "bold",
+  alpha = 0.5,
+  linewidth = 0,
+  show.legend = FALSE
+) +
+  
+# ----------------------------------------------------------
+# Annotate the number of sketch cells
+# ----------------------------------------------------------
+annotate(
+  geom = "text",
+  x = Inf,
+  y = -Inf,
+  label = paste0(
+    "n = ",
+    format(
+      nrow(sketch_umap_df),
+      big.mark = ",",
+      trim = TRUE
+    )
+  ),
+  vjust = -1.5,
+  hjust = 1.25,
+  color = "black",
+  size = 2.5
+)
+
+save_plot(
+  plot_object = p_sketch,
+  file_stub = "sketch_labeled",
+  save_dir = plot_dir,
+  width = 7,
+  height = 7
+)
+
+p_projection_compare <- p_sketch | p_projected
+
+save_plot(
+  plot_object = p_projection_compare,
+  file_stub = paste0("umap_projection_comparison"),
+  save_dir = plot_dir,
+  width = 14,
+  height = 10
+)
+
+
+
+
+
+# ------------------------------------------------------------
+# Projection confidence and sketch silhouette comparison
+#
+# ------------------------------------------------------------
+
+# Summarize projected cluster assignment confidence
+cat("\nSummary of Clustering Confidence:\n")
+summary(mega_obj$seurat_cluster.projected.score)
+
+# ------------------------------------------------------------
+# Build a shared cluster ordering from the sketch clusters
+#
+# We order clusters by the number of sketch cells in each group
+# ------------------------------------------------------------
+
+cluster_counts <- sort(
+  table(mega_obj$seurat_cluster.sketched),
+  decreasing = TRUE
+)
+
+cluster_order <- names(cluster_counts)
+
+cluster_percent <- 100 * cluster_counts / sum(cluster_counts)
 
 cluster_label_map <- setNames(
   paste0(
@@ -251,19 +542,32 @@ cluster_label_map <- setNames(
   names(cluster_counts)
 )
 
+
+mega_obj$seurat_cluster.projected.ordered <- factor(
+  mega_obj$seurat_cluster.projected,
+  levels = cluster_order
+)
+
+mega_obj$seurat_cluster.sketched.ordered <- factor(
+  mega_obj$seurat_cluster.sketched,
+  levels = cluster_order
+)
+
 # ------------------------------------------------------------
 # Projection confidence violin plot
+#
+# This shows the confidence score assigned by ProjectData()
+# for each projected cluster assignment.
 # ------------------------------------------------------------
 
 cluster_proj_score_plot <- VlnPlot(
-  mega_obj_umapped,
+  mega_obj,
   features = "seurat_cluster.projected.score",
+  group.by = "seurat_cluster.projected.ordered",
   pt.size = 0
 ) +
-  scale_x_discrete(
-    labels = cluster_label_map
-  ) +
-  xlab("Projected Cluster\n(% of Total Cells / Cell Count)") +
+  scale_x_discrete(labels = cluster_label_map) +
+  xlab("Projected Cluster\n(% of Sketch Cells / Cell Count)") +
   ggtitle("Projected Cluster Assignment Confidence") +
   theme(
     axis.text.x = element_text(
@@ -273,53 +577,277 @@ cluster_proj_score_plot <- VlnPlot(
     )
   )
 
+# ------------------------------------------------------------
+# Prepare a sketch-only object for the silhouette plot
+#
+# Silhouette values exist only for sketch cells, so subset the
+# object to cells with non-NA silhouette values.
+# ------------------------------------------------------------
+
+sketch_cells <- WhichCells(
+  mega_obj,
+  expression = !is.na(silhouette)
+)
+
+sketch_obj <- subset(
+  mega_obj,
+  cells = sketch_cells
+)
+
+# Add the ordered sketch grouping column to the subset object
+sketch_obj$seurat_cluster.sketched.ordered <- factor(
+  sketch_obj$seurat_cluster.sketched,
+  levels = cluster_order
+)
+
+# ------------------------------------------------------------
+# Approximate sketch silhouette violin plot
+#
+# This shows silhouette values for the sketch cells using the
+# same cluster order as the projection confidence plot.
+# ------------------------------------------------------------
+
+sketch_silhouette_plot <- VlnPlot(
+  sketch_obj,
+  features = "silhouette",
+  group.by = "seurat_cluster.sketched.ordered",
+  pt.size = 0
+) +
+  scale_x_discrete(labels = cluster_label_map) +
+  xlab("Sketch Cluster\n(% of Sketch Cells / Cell Count)") +
+  ggtitle("Approximate Sketch Silhouette") +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1,
+      size = 8
+    )
+  )
+
+# ------------------------------------------------------------
+# Combine both plots
+# ------------------------------------------------------------
+combined_qc_plot <-
+  cluster_proj_score_plot /
+  sketch_silhouette_plot
+
+combined_qc_plot
+
+
+
 save_plot(
   plot_object = cluster_proj_score_plot,
-  file_stub = paste0(plot_prefix, "_seurat_cluster.projected.score"),
+  file_stub = "seurat_cluster.projected.score",
   save_dir = plot_dir,
-  width = 48,
+  width = 12,
+  height = 6
+)
+
+save_plot(
+  plot_object = sketch_silhouette_plot,
+  file_stub = "sketch_silhouette",
+  save_dir = plot_dir,
+  width = 12,
+  height = 6
+)
+
+save_plot(
+  plot_object = combined_qc_plot,
+  file_stub = "cluster_quality",
+  save_dir = plot_dir,
+  width = 12,
   height = 12
 )
 
-# allows us to see:
-# clusters with consistently high-confidence assignments,
-# clusters with low-confidence assignments,
-# clusters that may represent transitions or ambiguous cell states.
 
-#TODO: update numbers, removed #5
 
-#undos ordering clusters based on size
-mega_obj_umapped$seurat_cluster.projected <- factor(
-  mega_obj_umapped$seurat_cluster.projected,
-  levels = sort(
-    unique(as.numeric(as.character(
-      mega_obj_umapped$seurat_cluster.projected
-    )))
-  )
+
+
+
+
+
+# ------------------------------------------------------------
+#
+# Umaps colored by silhouette scores
+#
+# ------------------------------------------------------------
+umap_silhouette_plot_rwb <- FeaturePlot(
+  sketch_obj,
+  features = "silhouette",
+  reduction = "umap.sketch",
+  pt.size = 0.25,
+  order = TRUE,
+  label = TRUE,
+  repel = TRUE,
+  raster = FALSE
+) +
+  scale_color_gradient2(
+    low = "#313695",
+    mid = "white",
+    high = "#A50026",
+    midpoint = 0,
+    limits = c(-1, 1),
+    name = "Silhouette"
+  ) +
+  ggtitle("Approximate Sketch Silhouette") +
+  theme_classic()
+
+save_plot(
+  plot_object = umap_silhouette_plot_rwb,
+  file_stub = "umap_silhouette_plot_rwb",
+  save_dir = plot_dir,
+  width = 12,
+  height = 10,
+  dpi = 1200
 )
 
-Idents(mega_obj_umapped) <- "seurat_cluster.projected"
+umap_silhouette_plot_red_green <- FeaturePlot(
+  sketch_obj,
+  features = "silhouette",
+  reduction = "umap.sketch",
+  pt.size = 0.25,
+  order = TRUE,
+  label = TRUE,
+  repel = TRUE,
+  raster = FALSE
+) +
+  scale_color_gradientn(
+    colors = c(
+      "#d73027",  # red
+      "#fc8d59",  # orange
+      "#fee08b",  # yellow
+      "#91cf60",  # light green
+      "#1a9850"   # dark green
+    ),
+    values = scales::rescale(c(-1, 0, 0.25, 0.50, 0.75)),
+    limits = c(-1, 1),
+    oob = scales::squish,
+    name = "Silhouette"
+  ) +
+  ggtitle("Approximate Sketch Silhouette") +
+  theme_classic()
+
+save_plot(
+  plot_object = umap_silhouette_plot_red_green,
+  file_stub = "umap_silhouette_plot_red_green",
+  save_dir = plot_dir,
+  width = 12,
+  height = 10,
+  dpi = 1200
+)
+
+#----------------------------------------
+# Categorize silhouette scores
+#----------------------------------------
+
+sketch_obj$silhouette_category <- cut(
+  sketch_obj$silhouette,
+  breaks = c(-Inf, 0, 0.25, 0.50, 0.75, Inf),
+  labels = c(
+    "< 0",
+    "0 - 0.25",
+    "0.25 - 0.50",
+    "0.50 - 0.75",
+    "> 0.75"
+  ),
+  include.lowest = TRUE,
+  right = FALSE
+)
+
+#----------------------------------------
+# UMAP colored by silhouette category
+#----------------------------------------
+
+silhouette_umap_categorical <-
+  DimPlot(
+    sketch_obj,
+    reduction = "umap.sketch",
+    group.by = "silhouette_category",
+    pt.size = 0.01,
+    shuffle = TRUE,
+    raster = FALSE
+  ) +
+  scale_color_manual(
+    values = c(
+      "< 0"         = "#d73027",
+      "0 - 0.25"    = "#fc8d59",
+      "0.25 - 0.50" = "#fee08b",
+      "0.50 - 0.75" = "#91cf60",
+      "> 0.75"      = "#1a9850"
+    ),
+    drop = FALSE,
+    name = "Silhouette"
+  ) +
+  ggtitle("Approximate Sketch Silhouette") +
+  theme_classic()
+
+
+save_plot(
+  plot_object = silhouette_umap_categorical,
+  file_stub = paste0("silhouette_umap_categorical"),
+  save_dir = plot_dir,
+  width = 12,
+  height = 10,
+  dpi = 1200
+)
+
+#combine and save
+silhouette_umaps <- umap_silhouette_plot_red_green |
+  silhouette_umap_categorical
+
+save_plot(
+  plot_object = silhouette_umaps,
+  file_stub = paste0("combined_silhouette_umaps"),
+  save_dir = plot_dir,
+  width = 20,
+  height = 8,
+  dpi = 1200
+)
+
+
+
+rm(sketch_obj) #cleanup memory, removes obj with only sketch cells
+
+
+
+
+
+
+
+
+
+# Creates standardized experimental metadata columns from the
+# original tissue names. This includes:
+#   - experimental_group
+#   - tissue_id
+#   - experimental_group_tissue
+#   - genotype
+#   - treatment
+#   - timepoint
+#   - phenotype
+mega_obj <- add_experimental_metadata(mega_obj)
+
+
 # ------------------------------------------------------------
-# 6) Plot: slide mixing on projected UMAP
+# slide mixing on projected UMAP
 # ------------------------------------------------------------
 p_slide_mix <- DimPlot(
-  mega_obj_umapped,
+  mega_obj,
   reduction = "full.umap.sketch",
-  group.by = "sample_tissue"
+  group.by = "slide_id"
 ) +
   ggtitle("Projected UMAP Colored by Original Visium HD Slide")
 
 save_plot(
   plot_object = p_slide_mix,
-  file_stub = paste0(plot_prefix, "_umap_slide_mixing"),
+  file_stub = "umap_slide_mixing",
   save_dir = plot_dir,
   width = 9,
   height = 7
 )
 
-
 p_tissue <- DimPlot(
-  mega_obj_umapped,
+  mega_obj,
   reduction = "full.umap.sketch",
   group.by = "tissue"
 ) +
@@ -327,7 +855,7 @@ p_tissue <- DimPlot(
 
 save_plot(
   plot_object = p_tissue,
-  file_stub = paste0(plot_prefix, "_umap_per_tissue_mixing"),
+  file_stub = "experimental_group",
   save_dir = plot_dir,
   width = 9,           
   height = 7,
@@ -335,12 +863,106 @@ save_plot(
 
 
 # ------------------------------------------------------------
+# Projection uncertainty vs tissue identity
+#
+# Visualize where ProjectData() was most and least confident
+# assigning projected cluster labels.
+#
+# plots help determine whether uncertainty is
+# driven by particular tissues or shared across the dataset.
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# Compute projection uncertainty
+# ------------------------------------------------------------
+
+#default version
+
+p_confidence <- FeaturePlot(
+  mega_obj,
+  reduction = "full.umap.sketch",
+  features = "seurat_cluster.projected.score",
+  order = TRUE,
+  raster = FALSE,
+  pt.size = 0.0001,
+) +
+  ggtitle("Projected Cluster Assignment Confidence")
+
+confidence_vs_tissue_plot <-
+  p_confidence |
+  p_tissue
+
+save_plot(
+  plot_object = confidence_vs_tissue_plot,
+  file_stub = "umap_confidence_vs_tissue",
+  save_dir = plot_dir,
+  width = 15,
+  height = 7
+)
+
+
+
+mega_obj$projection_uncertainty <-
+  1 - mega_obj$seurat_cluster.projected.score
+
+# ------------------------------------------------------------
+# Projection uncertainty UMAP
+# ------------------------------------------------------------
+
+p_projection_uncertainty <- FeaturePlot(
+  mega_obj,
+  reduction = "full.umap.sketch",
+  features = "projection_uncertainty",
+  order = TRUE,
+  raster = FALSE,
+  pt.size = 0.001
+) +
+  scale_color_gradientn(
+    colors = c(
+      "#440154",
+      "#31688E",
+      "#35B779",
+      "#FDE725"
+    ),
+    limits = c(0, 1),
+    name = "Projection\nUncertainty"
+  ) +
+  ggtitle("Projected UMAP Colored by Projection Uncertainty")
+
+# ------------------------------------------------------------
+# Tissue identity UMAP
+# ------------------------------------------------------------
+
+p_tissue_identity <- DimPlot(
+  mega_obj,
+  reduction = "full.umap.sketch",
+  group.by = "experimental_group"
+) +
+  ggtitle("Projected UMAP Colored by Tissue")
+
+# ------------------------------------------------------------
+# Side-by-side comparison
+# ------------------------------------------------------------
+
+projection_uncertainty_plot <-
+  p_projection_uncertainty |
+  p_tissue_identity
+
+save_plot(
+  plot_object = projection_uncertainty_plot,
+  file_stub = "umap_projection_uncertainty_vs_tissue",
+  save_dir = plot_dir,
+  width = 18,
+  height = 7
+)
+
+# ------------------------------------------------------------
 # 7) Plot: sketch cell coverage
 # ------------------------------------------------------------
 p_sketch_cells <- DimPlot(
-  mega_obj_umapped,
+  mega_obj,
   reduction = "full.umap.sketch",
-  cells.highlight = colnames(mega_obj_umapped[["sketch"]]),
+  cells.highlight = colnames(mega_obj[["sketch"]]),
   cols.highlight = "red",
   cols = "blue"
 ) +
@@ -356,7 +978,7 @@ p_sketch_cells <- DimPlot(
 
 save_plot(
   plot_object = p_sketch_cells,
-  file_stub = paste0(plot_prefix, "_umap_sketch_cells_highlighted"),
+  file_stub = "umap_sketch_cells_highlighted",
   save_dir = plot_dir,
   width = 9,           
   height = 7,
@@ -364,71 +986,7 @@ save_plot(
 
 
 
-# Save current assay so we can restore it afterward
-original_assay <- DefaultAssay(mega_obj_umapped)
 
-
-# ------------------------------------------------------------
-# Information for plot titles
-# ------------------------------------------------------------
-
-n_sketch_cells <- ncol(mega_obj_umapped[["sketch"]])
-n_total_cells  <- ncol(mega_obj_umapped)
-
-sketch_title <- sprintf(
-  "Sketch UMAP\nRepresentative sketch of %s cells (%.1f%% of dataset)",
-  format(n_sketch_cells, big.mark = ","),
-  100 * n_sketch_cells / n_total_cells
-)
-
-projected_title <- sprintf(
-  "Projected UMAP\nProjection of all %s cells into sketch UMAP",
-  format(n_total_cells, big.mark = ",")
-)
-
-# ------------------------------------------------------------
-# Sketch UMAP
-# ------------------------------------------------------------
-DefaultAssay(mega_obj_umapped) <- "sketch"
-Idents(mega_obj_umapped) <- "seurat_cluster.sketched"
-
-p_sketch <- DimPlot(
-  mega_obj_umapped,
-  reduction = "umap.sketch",
-  label = FALSE
-) +
-  ggtitle(sketch_title) +
-  theme(legend.position = "bottom")
-
-# ------------------------------------------------------------
-# Projected UMAP
-# ------------------------------------------------------------
-DefaultAssay(mega_obj_umapped) <- original_assay
-Idents(mega_obj_umapped) <- "seurat_cluster.projected"
-
-p_projected <- DimPlot(
-  mega_obj_umapped,
-  reduction = "full.umap.sketch",
-  label = FALSE
-) +
-  ggtitle(projected_title) +
-  theme(legend.position = "bottom")
-
-# Restore original assay
-DefaultAssay(mega_obj_umapped) <- original_assay
-
-# ------------------------------------------------------------
-# Combine and save
-# ------------------------------------------------------------
-p_projection_compare <- p_sketch | p_projected
-
-save_plot(
-  plot_object = p_projection_compare,
-  file_stub = paste0(plot_prefix, "_umap_projection_comparison"),
-  save_dir = plot_dir,
-  width = 14,
-  height = 10
-)
 
 
 
@@ -452,7 +1010,7 @@ save_plot(
 
 umap_df <- as.data.frame(
   Embeddings(
-    mega_obj_umapped,
+    mega_obj,
     "full.umap.sketch"
   )
 )
@@ -462,15 +1020,15 @@ umap_df$cell <- rownames(umap_df)
 
 # Identify sketch cells
 umap_df$sketch <- umap_df$cell %in%
-  colnames(mega_obj_umapped[["sketch"]])
+  colnames(mega_obj[["sketch"]])
 
 # ------------------------------------------------------------
 # Expected sampling ratio
 # ------------------------------------------------------------
 
 expected_ratio <-
-  ncol(mega_obj_umapped[["sketch"]]) /
-  ncol(mega_obj_umapped)
+  ncol(mega_obj[["sketch"]]) /
+  ncol(mega_obj)
 
 cat(
   sprintf(
@@ -480,10 +1038,10 @@ cat(
 )
 
 # ------------------------------------------------------------
-# Bin UMAP into a regular grid
+# Bin UMAP into a grid
 # ------------------------------------------------------------
 
-grid_size <- 100
+grid_size <- 1000
 
 umap_df <- umap_df %>%
   mutate(
@@ -531,7 +1089,7 @@ sampling_ratio_plot <- ggplot(
   )
 ) +
   geom_point(
-    size = 1.5
+    size = 0.05
   ) +
   scale_color_gradient2(
     low = "royalblue3",
@@ -554,17 +1112,6 @@ sampling_ratio_plot <- ggplot(
   theme_classic()
 
 
-# ------------------------------------------------------------
-# Projected clusters
-# ------------------------------------------------------------
-
-p_projected <- DimPlot(
-  mega_obj_umapped,
-  reduction = "full.umap.sketch",
-  group.by = "seurat_cluster.projected",
-  label = FALSE
-) +
-  ggtitle("Projected UMAP Colored by Projected Cluster")
 
 # ------------------------------------------------------------
 # Side-by-side comparison
@@ -574,10 +1121,7 @@ sampling_qc_plot <- p_projected | sampling_ratio_plot
 
 save_plot(
   plot_object = sampling_qc_plot,
-  file_stub = paste0(
-    plot_prefix,
-    "_sampling_ratio_qc"
-  ),
+  file_stub ="sampling_ratio_qc",
   save_dir = plot_dir,
   width = 16,
   height = 7
@@ -588,14 +1132,186 @@ save_plot(
 
 
 
+# ------------------------------------------------------------
+# Local UMAP Density
+#
+# Colors each region of the UMAP by the number of cells within
+# a square neighborhood. Smaller bin_width values produce
+# higher-resolution density maps.
+# ------------------------------------------------------------
+# Extract UMAP coordinates
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# Extract UMAP coordinates
+# ------------------------------------------------------------
+
+umap_df <- as.data.frame(
+  Embeddings(
+    mega_obj,
+    "full.umap.sketch"
+  )
+)
+
+colnames(umap_df) <- c("UMAP_1", "UMAP_2")
+
+# ------------------------------------------------------------
+# Bin UMAP into a regular grid
+#
+# Smaller bin_width = more bins = higher resolution
+# Larger bin_width  = fewer bins = smoother density
+# ------------------------------------------------------------
+
+bin_width <- 0.1
+
+umap_df <- umap_df %>%
+  mutate(
+    x_bin = floor(UMAP_1 / bin_width),
+    y_bin = floor(UMAP_2 / bin_width)
+  )
+
+# ------------------------------------------------------------
+# Count cells within each grid square
+# ------------------------------------------------------------
+
+density_df <- umap_df %>%
+  group_by(
+    x_bin,
+    y_bin
+  ) %>%
+  summarise(
+    n_cells = n(),
+    UMAP_1 = (first(x_bin) + 0.5) * bin_width,
+    UMAP_2 = (first(y_bin) + 0.5) * bin_width,
+    .groups = "drop"
+  )
+
+# ------------------------------------------------------------
+# Clip color scale to improve contrast
+#
+# Change this percentile if desired:
+#   0.99  = strongest contrast
+#   0.995 = moderate
+#   0.999 = conservative
+# ------------------------------------------------------------
+
+clip_percentile <- 0.995
+
+upper_limit <- quantile(
+  density_df$n_cells,
+  clip_percentile
+)
+
+# ------------------------------------------------------------
+# Plot local density
+# ------------------------------------------------------------
+
+density_plot <- ggplot(
+  density_df,
+  aes(
+    x = UMAP_1,
+    y = UMAP_2
+  )
+) +
+  geom_tile(
+    aes(
+      fill = pmin(n_cells, upper_limit)
+    ),
+    width = bin_width,
+    height = bin_width
+  ) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    limits = c(0, upper_limit),
+    oob = scales::squish,
+    name = "Cells\nper bin"
+  ) +
+  coord_equal(expand = FALSE) +
+  labs(
+    title = "Local UMAP Density",
+    subtitle = sprintf(
+      "Bin width = %.2f UMAP units | Color scale clipped at %.1fth percentile (%.0f cells/bin)",
+      bin_width,
+      clip_percentile * 100,
+      upper_limit
+    ),
+    x = "UMAP 1",
+    y = "UMAP 2"
+  ) +
+  theme_classic()
+
+density_plot_combined <- p_projected | density_plot
 
 
+save_plot(
+  plot_object = density_plot_combined,
+  file_stub = "density_plot",
+  save_dir = plot_dir,
+  width = 14,
+  height = 7
+)
+
+
+
+
+
+
+Idents(mega_obj) <- "seurat_cluster.sketched"
+
+cluster_colors <- extract_dimplot_colors(
+  mega_obj,
+  reduction = "umap.sketch",
+  group.by = "seurat_cluster.sketched"
+)
+
+p_cluster_tree <- plot_cluster_tree(
+  mega_obj,
+  reduction = embedding_reduction,
+  ndims = max_dims,
+  cluster_colors = cluster_colors
+)
+
+cluster_tree_combined <- p_projected | p_cluster_tree
+
+
+
+# p_cluster_tree <- plot_cluster_tree(
+#   object = mega_obj,
+#   reduction = "harmony.sketch",
+#   ndims = 30
+# )
+# 
+# p_cluster_tree
+
+
+save_plot(
+  plot_object = cluster_tree_combined,
+  file_stub = "cluster_tree",
+  save_dir = plot_dir,
+  width = 12,
+  height = 7
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#TODO make these exclude the top .5% so its a better visiuallization?
 #additional plots via mega_umapper_plotter
 plot_umap_features(
-  object = mega_obj_umapped,
+  object = mega_obj,
   features = c(
-    paste0("nCount_", DefaultAssay(mega_obj_umapped)),
-    paste0("nFeature_", DefaultAssay(mega_obj_umapped)),
+    paste0("nCount_", DefaultAssay(mega_obj)),
+    paste0("nFeature_", DefaultAssay(mega_obj)),
     "percent.mt"
   ),
   save_dir = file.path(
@@ -604,31 +1320,30 @@ plot_umap_features(
   )
 )
 
-plot_umap_metadata(
-  object = mega_obj_umapped,
-  variables = c(
-    "sample_tissue",
-    "tissue"
-  ),
-  save_dir = file.path(
-    plot_dir,
-    "Metadata"
-  )
-)
+
+# plot_umap_metadata(
+#   object = mega_obj,
+#   variables = c(
+#     "experimental_group_tissue",
+#     "tissue"
+#   ),
+#   save_dir = file.path(
+#     plot_dir,
+#     "Metadata"
+#   )
+# )
 
 # plot_umap_features(
-#   object = mega_obj_umapped,
+#   object = mega_obj,
 #   features = c(
-#     "EPCAM",
-#     "KRT8",
-#     "KRT19",
-#     "MUC1"
+#     "Epcam",
+#     "Krt8",
+#     "Krt19",
+#     "Muc1"
 #   ),
 #   save_dir = file.path(
 #     plot_dir,
 #     "Markers"
 #   )
 # )
-# 
-# options(future.globals.maxSize = 16 * 1024^3)
 

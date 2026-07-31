@@ -170,17 +170,17 @@ plot_umap_features <- function(
   # ----------------------------------------------------------
   # Save each individual plot.
   # ----------------------------------------------------------
-  for (feature in features) {
-    
-    save_plot(
-      plot_object = plots[[feature]],
-      file_stub = paste0("feature_", feature),
-      save_dir = save_dir,
-      width = individual_size,
-      height = individual_size
-    )
-    
-  }
+  # for (feature in features) {
+  #   
+  #   save_plot(
+  #     plot_object = plots[[feature]],
+  #     file_stub = paste0("feature_", feature),
+  #     save_dir = save_dir,
+  #     width = individual_size,
+  #     height = individual_size
+  #   )
+  #   
+  # }
   
   return(combined_plot)
   
