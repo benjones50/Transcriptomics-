@@ -1,5 +1,17 @@
 all is WIP, especially this readme
 
+Last day Internship upload.
+Config file has settings, load_projected_mega_obj loads object.
+
+Mega_umapper is the primary file where the post QC object is PCA'd, harmonized, umapped, and projected. clustree clusters multiple resolutions and plots them. paneled_umap_plotter also has a lot of plots. diff_express_runner is the differential expression stuff and both taking mega_obj as an input.
+
+Cluster gene analysis has spatial plots and analyzes some given marker genes
+
+
+
+Old stuff, leaving here bc may be useful:
+
+
 * = outdated or not currently functional
 
 main files:
