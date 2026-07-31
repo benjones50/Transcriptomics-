@@ -5,92 +5,6 @@
 #
 # -------------------------------------------------------------------------
 
-# ==========================================================
-# Internal helper: resolve the full assay
-#
-# Problem:
-# Downstream projection needs the original assay, but the
-# default assay may already be set to the sketch assay.
-#
-# If the user does not explicitly specify `full_assay`,
-# automatically choose the first assay that is NOT the sketch.
-#
-# This works for:
-#   Spatial.016um
-#   Spatial.008um
-#   Spatial
-#   RNA
-#   SCT
-#   segmented-cell assays
-# ==========================================================
-resolve_full_assay <- function(object, sketch_assay, full_assay = NULL) {
-  
-  if (is.null(full_assay)) {
-    
-    full_assay <- setdiff(
-      Assays(object),
-      sketch_assay
-    )[1]
-  }
-  
-  
-  if (is.na(full_assay)) {
-    stop(
-      "Could not determine the full assay automatically.",
-      call. = FALSE
-    )
-  }
-  
-  
-  if (identical(full_assay, sketch_assay)) {
-    stop(
-      "full_assay cannot be the same as sketch_assay ('", sketch_assay, "').",
-      call. = FALSE
-    )
-  }
-  
-  return(full_assay)
-}
-
-
-# ==========================================================
-# Internal helper: resolve the normalization method
-#
-# ProjectData() needs to know whether the original assay
-# came from SCTransform or standard log normalization.
-#
-# This is determined from the assay class so the projection
-# stage can work across both workflows.
-# ==========================================================
-resolve_normalization_method <- function(object, full_assay) {
-  
-  full_assay_object <- object[[full_assay]]
-  
-  if (inherits(full_assay_object, "SCTAssay")) {
-    
-    return("SCT")
-    
-  } else if (inherits(full_assay_object, "Assay5")) {
-    
-    return("LogNormalize")
-    
-  } else {
-    
-    stop(
-      "Unsupported assay class for full_assay '",
-      full_assay,
-      "': ",
-      class(full_assay_object)[1],
-      call. = FALSE
-    )
-    
-  }
-}
-
-
-
-
-
 
 # ==========================================================
 # Stage 1: Graph construction + clustering only
@@ -112,23 +26,37 @@ resolve_normalization_method <- function(object, full_assay) {
 run_sketch_clustering <- function(
     object,
     sketch_assay = "sketch",
-    sketch_reduction = "pca.sketch",
-    dims = 1:30,
-    resolution = 3,
-    cluster_name = "seurat_cluster.sketched"
+    sketch_reduction,
+    dims,
+    resolution, #this is weird bc updated to accept multiple resolutions while backwards compatible with using 1
+    resolutions = resolution,
+    selected_cluster_resolution = NULL,
+    cluster_name = "seurat_cluster.sketched"#,
+    #random_seed = 42
 ) {
   
-
   
-
+  if (is.null(selected_cluster_resolution)) {
+    selected_cluster_resolution <- resolution
+  }
+  
+  if (!selected_cluster_resolution %in% resolutions) {
+    stop(
+      "selected_cluster_resolution must be one of the values in `resolutions`."
+    )
+  }
+  
+  # Convert to character for safe cluster-name construction
+  resolutions_chr <- as.character(resolutions)
+  selected_cluster_chr <- as.character(selected_cluster_resolution)
   
   message("--------------------------------------------")
-  message("Sketch assay  : ", sketch_assay)
-  message("PCA reduction : ", sketch_reduction)
-  message("Dimensions    : ", paste(range(dims), collapse = "-"))
-  message("Resolution    : ", resolution)
+  message("Sketch assay              : ", sketch_assay)
+  message("PCA reduction             : ", sketch_reduction)
+  message("Dimensions                : ", paste(range(dims), collapse = "-"))
+  message("Scan resolutions          : ", paste(resolutions_chr, collapse = ", "))
+  message("Selected cluster resolution: ", selected_cluster_chr)
   message("--------------------------------------------")
-  
   
   # ==========================================================
   # Build the graph and cluster the sketch
@@ -147,17 +75,71 @@ run_sketch_clustering <- function(
     dims = dims
   )
   
-  message("Finding clusters...")
+  message("Neighbor graph(s):")
+  print(Graphs(object))
   
-  object <- FindClusters(
-    object,
-    cluster.name = cluster_name,
-    resolution = resolution
-  )
+  message("Default assay:")
+  print(DefaultAssay(object))
   
+  message("Reductions:")
+  print(Reductions(object))
+  
+  message("Graphs available:")
+  print(Graphs(object))
+  
+  message("Finding clusters across resolutions...")
+  
+  #for multiple clusters
+  cluster_prefix <- "cluster_res_"
+  
+  n_res <- length(resolutions)
+  start_time <- Sys.time()
+  
+  for (i in seq_along(resolutions)) {
+    
+    res <- resolutions[i]
+    
+    message(
+      sprintf(
+        "[%d/%d] Clustering at resolution %.2f",
+        i, n_res, res
+      )
+    )
+    
+    object <- FindClusters(
+      object,
+      cluster.name = paste0(cluster_prefix, res),
+      resolution = res#,
+      #random.seed = random_seed
+    )
+    
+    
+    
+    elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
+    avg <- elapsed / i
+    eta <- avg * (n_res - i)
+    
+    message(sprintf("Elapsed: %.1f min | ETA: %.1f min", elapsed, eta))
+  }
+  
+  # ----------------------------------------------------------
+  # Promote selected resolution to canonical downstream column
+  # ----------------------------------------------------------
+  selected_cluster_col <- paste0(cluster_prefix, selected_cluster_chr)
+  
+  if (!selected_cluster_col %in% colnames(object[[]])) {
+    stop(
+      "Selected cluster column not found: ",
+      selected_cluster_col
+    )
+  }
+  
+  object[[cluster_name]] <- object[[selected_cluster_col]]
+  Idents(object) <- cluster_name
+  
+
   
   message("Sketch graph construction and clustering complete.")
-  
   return(object)
 }
 
@@ -188,7 +170,7 @@ run_sketch_clustering <- function(
 run_sketch_umap <- function(
     object,
     sketch_assay = "sketch",
-    sketch_reduction = "pca.sketch",
+    sketch_reduction,
     sketch_umap = "umap.sketch",
     dims = 1:30
 ) {
@@ -262,12 +244,13 @@ run_sketch_umap <- function(
 # ==========================================================
 run_sketch_projection <- function(
     object,
+    normalization_method,
     full_assay = NULL,
     sketch_assay = "sketch",
-    sketch_reduction = "pca.sketch",
+    sketch_reduction,
     projected_reduction = "projected.pca",
     sketch_umap = "umap.sketch",
-    dims = 1:30,
+    ndims,
     cluster_name = "seurat_cluster.sketched"
 ) {
   
@@ -284,7 +267,6 @@ run_sketch_projection <- function(
     full_assay = full_assay
   )
   
-  
 
   
   message("--------------------------------------------")
@@ -293,7 +275,7 @@ run_sketch_projection <- function(
   message("PCA reduction : ", sketch_reduction)
   message("UMAP model    : ", sketch_umap)
   message("Projection    : ", projected_reduction)
-  message("Dimensions    : ", paste(range(dims), collapse = "-"))
+  message("Dimensions    : ", ndims)
   message("--------------------------------------------")
   
   
@@ -306,11 +288,6 @@ run_sketch_projection <- function(
   # This is determined automatically from the assay class,
   # so the function works across both workflows.
   # ==========================================================
-  
-  normalization_method <- resolve_normalization_method(
-    object = object,
-    full_assay = full_assay
-  )
   
   message("Normalization method: ", normalization_method)
   
@@ -341,7 +318,7 @@ run_sketch_projection <- function(
       seurat_cluster.projected = cluster_name
     ),
     umap.model = sketch_umap,
-    dims = dims
+    dims = 1:ndims
   )
   
   

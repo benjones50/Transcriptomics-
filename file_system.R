@@ -1,40 +1,74 @@
+# ==========================================================
+# Mega analysis directory structure
+#
+# Every merged ("mega") analysis is organized by:
+#   1. Analysis mode (binned / segmented)
+#   2. Bin size (if applicable)
+#   3. QC filtering parameters
+#   4. Normalization method
+#
+# Each analysis stage receives its own subdirectory so that
+# intermediate Seurat objects, figures, and result tables can
+# be cached independently and reused without recomputation.
+#
+# Directory layout
+# ----------------
+#
 # mega/
-#     2um/
-#         SCT/
-#             QC_15_1500_15_1250_MT20/
+#   ...
+#     sct/
+#       
+#       embeddings/
 # 
-#                 object.rds
-# 
-#                 metadata/
-#                     run_info.yaml
-#                     session_info.txt
-#                     object_summary.csv
-# 
-#                 dimension_reduction/
-#                     pca/
-#                         dims50/
-#                             object.rds          
-#                             elbow.pdf
-#                             loadings.pdf
-# 
-#                 clustering/
-#                     dims30_res0.8/
-#                         object.rds              
-#                         umap.pdf
-#                         cluster_markers.csv
-#                         cluster_summary.csv
-# 
-#                 annotation/
-#                     module_scores/
-#                     cell_types/
-# 
-#                 differential_expression/
-# 
-#                 figures/
-# 
-#                 exports/
-# 
-# 
+#                 pca/
+#             
+#                     sketch33_dims50/
+#             
+#                         object.rds
+#             
+#                         clustering/
+#             
+#                             dims30_res1/
+#             
+#                                 object.rds
+#             
+#                                 umap/
+#             
+#                                     object.rds
+#             
+#                                     projection/
+#             
+#                                         object.rds
+#             
+#                             dims30_res2/
+#             
+#                                 object.rds
+#             
+#                                 umap/
+#             
+#                                     object.rds
+#             
+#                                     projection/
+#             
+#                                         object.rds
+#             
+#                             dims40_res3/
+#             
+#                                 object.rds
+#             
+#                                 umap/
+#             
+#                                     object.rds
+#             
+#                                     projection/
+#             
+#                                         object.rds
+#                   harmony/
+#       annotation/
+#       differential_expression/
+#       exports/
+#       metadata/
+# ==========================================================
 
 
 
@@ -385,9 +419,6 @@ get_nested_subdir <- function(
 
 
 
-
-
-
 get_metadata_dir <- function(root_dir) {
   
   get_nested_subdir(
@@ -414,34 +445,72 @@ get_exports_dir <- function(root_dir) {
   
 }
 
-
-
-
-
-
-
-
-
-
-
-#next layer:
-
-get_pca_dir <- function(
-    root_dir,
-    dims
-) {
-  
-  
+get_embeddings_dir <- function(root_dir) {
   
   get_nested_subdir(
-    root_dir,
-    "pca",
-    paste0("dims", dims)
+    parent_dir = root_dir,
+    "embeddings"
   )
   
 }
 
 
+
+
+
+
+
+
+get_pca_dir <- function(
+    root_dir,
+    ndims,
+    sketch_label
+) {
+  
+  embeddings_dir <- get_embeddings_dir(root_dir)
+  
+  get_nested_subdir(
+    parent_dir = embeddings_dir,
+    "pca",
+    paste0(
+      sketch_label,
+      "_dims",
+      ndims
+    )
+  )
+  
+}
+
+
+get_harmony_dir <- function(
+    root_dir,
+    ndims,
+    sketch_label,
+    group.by.vars,
+    theta = NULL
+) {
+  
+  embeddings_dir <- get_embeddings_dir(root_dir)
+  
+  dir_name <- paste0(
+    sketch_label,
+    "_dims",
+    ndims,
+    group.by.vars,
+    if (!is.null(theta)) {
+      paste0("_theta", theta)
+    } else {
+      ""
+    }
+  )
+  
+  get_nested_subdir(
+    parent_dir = embeddings_dir,
+    "harmony",
+    dir_name
+  )
+  
+}
 
 
 
@@ -453,21 +522,23 @@ get_pca_dir <- function(
 #
 # Example
 # -------
-# clustering/
-#     dims30_res3/
+# pca/
+#     sketch50_dims50/
+#         clustering/
+#             dims30_res3/
 # ------------------------------------------------------------
 get_clustering_dir <- function(
-    root_dir,
-    dims,
+    embedding_run_dir,
+    ndims, # Number of embedding dimensions used for clustering.
     resolution
 ) {
   
   get_nested_subdir(
-    parent_dir = root_dir,
+    parent_dir = embedding_run_dir,
     "clustering",
     paste0(
       "dims",
-      max(dims),
+      ndims,
       "_res",
       resolution
     )
@@ -475,133 +546,67 @@ get_clustering_dir <- function(
   
 }
 
-
-# ------------------------------------------------------------
-# Get the sketch projection analysis directory
-#
-# Returns (and creates if necessary) the directory used to
-# store a projected sketch analysis.
-#
-# Example
-# -------
-# projection/
-#     dims30/
-# ------------------------------------------------------------
-get_projection_dir <- function(
-    root_dir,
-    dims
-) {
-  
-  get_nested_subdir(
-    parent_dir = root_dir,
-    "projection",
-    paste0(
-      "dims",
-      max(dims)
-    )
-  )
-  
-}
-
-
-
-# ------------------------------------------------------------
-# Get the Harmony analysis directory
-#
-# Returns (and creates if necessary) the directory used to
-# store a Harmony integration run.
-#
-# Example
-# -------
-# dimension_reduction/
-#     harmony/
-#         dims50_theta2/
-# ------------------------------------------------------------
-get_harmony_dir <- function(
-    root_dir,
-    dims,
-    theta
-) {
-  
-  
-  get_nested_subdir(
-    root_dir,
-    "harmony",
-    paste0(
-      "dims",
-      dims,
-      "_theta",
-      theta
-    )
-  )
-  
-}
-
-
-
 # ------------------------------------------------------------
 # Get the UMAP analysis directory
 #
 # Returns (and creates if necessary) the directory used to
-# store a UMAP computed from a specified number of dimensions.
+# store the UMAP computed from a clustering analysis.
 #
 # Example
 # -------
-# dimension_reduction/
-#     umap/
-#         dims30/
+# pca/
+#     sketch50_dims50/
+#         clustering/
+#             dims30_res3/
+#                 umap/
 # ------------------------------------------------------------
-get_umap_dir <- function(
-    root_dir,
-    dims
-) {
+get_umap_dir <- function(clustering_dir) {
   
   get_nested_subdir(
-    root_dir,
-    "umap",
-    paste0("dims", max(dims))
+    parent_dir = clustering_dir,
+    "umap"
   )
   
 }
 
+# get_tsne_dir <- function( clustering_dir ) {
+#   ...
+# }
 
 
 
 # ------------------------------------------------------------
-# Get the Spatially Variable Gene (SVI) analysis directory
+# Get the projection analysis directory
 #
 # Returns (and creates if necessary) the directory used to
-# store results from a spatially variable gene analysis.
-#
-# Supported methods include:
-#   - moran
-#   - spark
-#   - hotspot
+# store projected analyses generated from a UMAP.
 #
 # Example
 # -------
-# dimension_reduction/
-#     svi/
-#         moran/
+# pca/
+#     sketch50_dims50/
+#         clustering/
+#             dims30_res3/
+#                 umap/
+#                     projection/
 # ------------------------------------------------------------
-get_svi_dir <- function(
-    root_dir,
-    method = c(
-      "moran",
-      "spark",
-      "hotspot"
-    )
-) {
-  
-  method <- match.arg(method)
+get_projection_dir <- function(umap_dir) {
   
   get_nested_subdir(
-    root_dir,
-    "svi",
-    method
+    parent_dir = umap_dir,
+    "projection"
   )
   
 }
+
+
+
+
+
+
+
+
+
 
 
 

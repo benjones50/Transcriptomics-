@@ -8,6 +8,7 @@ library(ggbeeswarm)
 
 #TODO, make this work with segmented cell data ! ! ! !
 
+#this is very old, unclear if still functional for qc plots
 
 # ------------------------------------------------------------
 # Load project configuration
